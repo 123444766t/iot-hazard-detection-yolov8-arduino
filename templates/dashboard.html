@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAHDRS Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: linear-gradient(135deg, #1a1a2e, #16213e); color: white; min-height: 100vh; padding: 20px; }
+        .header { text-align: center; padding: 20px; margin-bottom: 20px; }
+        .header h1 { font-size: 2.5em; background: linear-gradient(45deg, #00f5ff, #00ff88); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #888; margin-top: 5px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 1400px; margin: 0 auto; }
+        .card { background: rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+        .card h3 { color: #00f5ff; margin-bottom: 15px; font-size: 1.1em; }
+        .sensor-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sensor-row:last-child { border-bottom: none; }
+        .sensor-name { color: #aaa; }
+        .sensor-value { font-size: 1.5em; font-weight: bold; }
+        .safe { color: #00ff88; }
+        .alert { color: #ff4444; animation: blink 0.5s infinite alternate; }
+        @keyframes blink { from { opacity: 1; } to { opacity: 0.5; } }
+        .chart-card { grid-column: 1 / -1; }
+        .alerts-list { max-height: 400px; overflow-y: auto; }
+        .alert-item { padding: 12px; margin-bottom: 10px; background: rgba(255,68,68,0.1); border-left: 4px solid #ff4444; border-radius: 8px; }
+        .alert-item .time { color: #888; font-size: 0.85em; }
+        .alert-item .msg { margin-top: 5px; }
+        .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #00ff88; margin-right: 8px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stat-box { text-align: center; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; }
+        .stat-num { font-size: 2em; font-weight: bold; color: #00f5ff; }
+        .stat-label { color: #888; font-size: 0.85em; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ SAHDRS Dashboard</h1>
+        <p><span class="status-indicator"></span>Live Monitoring Active</p>
+    </div>
+
+    <div class="grid">
+        <!-- Sensor Status Card -->
+        <div class="card">
+            <h3>📊 Live Sensor Status</h3>
+            <div id="sensors">
+                <div class="sensor-row"><span class="sensor-name">🟡 Gas</span><span class="sensor-value safe" id="gas">--</span></div>
+                <div class="sensor-row"><span class="sensor-name">🔥 Flame</span><span class="sensor-value safe" id="flame">--</span></div>
+                <div class="sensor-row"><span class="sensor-name">🌡️ Temperature</span><span class="sensor-value safe" id="temp">--°C</span></div>
+                <div class="sensor-row"><span class="sensor-name">💧 Humidity</span><span class="sensor-value safe" id="hum">--%</span></div>
+                <div class="sensor-row"><span class="sensor-name">📏 Distance</span><span class="sensor-value safe" id="dist">-- cm</span></div>
+                <div class="sensor-row"><span class="sensor-name">🏃 IR Motion</span><span class="sensor-value safe" id="ir">--</span></div>
+            </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="card">
+            <h3>📈 Quick Stats</h3>
+            <div class="stat-grid">
+                <div class="stat-box"><div class="stat-num" id="totalReadings">0</div><div class="stat-label">Total Readings</div></div>
+                <div class="stat-box"><div class="stat-num" id="totalAlerts">0</div><div class="stat-label">Total Alerts</div></div>
+                <div class="stat-box"><div class="stat-num" id="avgTemp">--</div><div class="stat-label">Avg Temp (°C)</div></div>
+                <div class="stat-box"><div class="stat-num" id="maxGas">--</div><div class="stat-label">Max Gas Level</div></div>
+            </div>
+        </div>
+
+        <!-- Recent Alerts -->
+        <div class="card">
+            <h3>🚨 Recent Alerts</h3>
+            <div class="alerts-list" id="alertsList">
+                <p style="color: #666;">No alerts yet</p>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="card chart-card">
+            <h3>📉 Sensor Trends (Last 50 Readings)</h3>
+            <canvas id="chartTemp" height="80"></canvas>
+        </div>
+
+        <div class="card chart-card">
+            <h3>💨 Gas & Distance Trends</h3>
+            <canvas id="chartGas" height="80"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let tempChart, gasChart;
+        let alertSound = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQ==');
+
+        function initCharts() {
+            const tempCtx = document.getElementById('chartTemp').getContext('2d');
+            tempChart = new Chart(tempCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Temperature (°C)', data: [], borderColor: '#ff6b6b', backgroundColor: 'rgba(255,107,107,0.1)', tension: 0.3 },
+                    { label: 'Humidity (%)', data: [], borderColor: '#4ecdc4', backgroundColor: 'rgba(78,205,196,0.1)', tension: 0.3 }
+                ]},
+                options: { responsive: true, plugins: { legend: { labels: { color: 'white' }}}, scales: { x: { ticks: { color: '#888' }}, y: { ticks: { color: '#888' }}}}
+            });
+
+            const gasCtx = document.getElementById('chartGas').getContext('2d');
+            gasChart = new Chart(gasCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Gas Level', data: [], borderColor: '#feca57', backgroundColor: 'rgba(254,202,87,0.1)', tension: 0.3 },
+                    { label: 'Distance (cm)', data: [], borderColor: '#48dbfb', backgroundColor: 'rgba(72,219,251,0.1)', tension: 0.3 }
+                ]},
+                options: { responsive: true, plugins: { legend: { labels: { color: 'white' }}}, scales: { x: { ticks: { color: '#888' }}, y: { ticks: { color: '#888' }}}}
+            });
+        }
+
+        async function updateSensors() {
+            try {
+                const r = await fetch('/api/sensors');
+                const d = await r.json();
+                if (!d.gas) return;
+                
+                document.getElementById('gas').textContent = d.gas;
+                document.getElementById('flame').textContent = d.flame == '0' ? '🔥 FIRE' : '✅';
+                document.getElementById('temp').textContent = d.temp_c + '°C';
+                document.getElementById('hum').textContent = d.humidity + '%';
+                document.getElementById('dist').textContent = d.distance_cm + ' cm';
+                document.getElementById('ir').textContent = d.ir == '0' ? '🏃 Motion' : '✅';
+
+                // Highlight alerts
+                document.getElementById('gas').className = 'sensor-value ' + (parseInt(d.gas) > 500 ? 'alert' : 'safe');
+                document.getElementById('flame').className = 'sensor-value ' + (d.flame == '0' ? 'alert' : 'safe');
+                document.getElementById('temp').className = 'sensor-value ' + (parseFloat(d.temp_c) > 40 ? 'alert' : 'safe');
+                document.getElementById('dist').className = 'sensor-value ' + (parseInt(d.distance_cm) > 0 && parseInt(d.distance_cm) < 20 ? 'alert' : 'safe');
+                document.getElementById('ir').className = 'sensor-value ' + (d.ir == '0' ? 'alert' : 'safe');
+            } catch(e) {}
+        }
+
+        async function updateHistory() {
+            try {
+                const r = await fetch('/api/history');
+                const data = await r.json();
+                if (!data.length) return;
+
+                const labels = data.map(d => d.timestamp.split('T')[1] || '');
+                tempChart.data.labels = labels;
+                tempChart.data.datasets[0].data = data.map(d => parseFloat(d.temp_c));
+                tempChart.data.datasets[1].data = data.map(d => parseFloat(d.humidity));
+                tempChart.update();
+
+                gasChart.data.labels = labels;
+                gasChart.data.datasets[0].data = data.map(d => parseInt(d.gas));
+                gasChart.data.datasets[1].data = data.map(d => parseInt(d.distance_cm));
+                gasChart.update();
+
+                // Stats
+                document.getElementById('totalReadings').textContent = data.length;
+                const temps = data.map(d => parseFloat(d.temp_c)).filter(t => !isNaN(t));
+                if (temps.length) document.getElementById('avgTemp').textContent = (temps.reduce((a,b)=>a+b)/temps.length).toFixed(1);
+                const gases = data.map(d => parseInt(d.gas)).filter(g => !isNaN(g));
+                if (gases.length) document.getElementById('maxGas').textContent = Math.max(...gases);
+            } catch(e) {}
+        }
+
+        let lastAlertCount = 0;
+        async function updateAlerts() {
+            try {
+                const r = await fetch('/api/alerts');
+                const data = await r.json();
+                document.getElementById('totalAlerts').textContent = data.length;
+
+                const list = document.getElementById('alertsList');
+                if (!data.length) {
+                    list.innerHTML = '<p style="color: #666;">No alerts yet</p>';
+                    return;
+                }
+
+                // Play sound if new alert
+                if (data.length > lastAlertCount && lastAlertCount > 0) {
+                    try { alertSound.play(); } catch(e){}
+                }
+                lastAlertCount = data.length;
+
+                list.innerHTML = data.map(a => `
+                    <div class="alert-item">
+                        <div class="time">${a.timestamp.split('T')[1] || a.timestamp}</div>
+                        <div class="msg"><strong>${a.alert_type}</strong>: ${a.message}</div>
+                    </div>
+                `).join('');
+            } catch(e) {}
+        }
+
+        initCharts();
+        setInterval(updateSensors, 1000);
+        setInterval(updateHistory, 3000);
+        setInterval(updateAlerts, 2000);
+        updateSensors(); updateHistory(); updateAlerts();
+    </script>
+</body>
+</html>

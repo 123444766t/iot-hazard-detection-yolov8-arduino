@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+logs/
+snapshots/
+*.pt
+*.onnx
+*.bin
+*.ckpt
+.DS_Store
